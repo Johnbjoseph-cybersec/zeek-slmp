@@ -1,0 +1,12 @@
+# Protocol confirmation for the SLMP analyzers. Parse errors reject the
+# protocol automatically, with the Spicy error as the reason.
+
+module Zeek_SLMP;
+
+import SLMP;
+import zeek;
+
+# A frame with a valid subheader, header and length that parsed completely.
+on SLMP::Frame::%done {
+    zeek::confirm_protocol();
+}

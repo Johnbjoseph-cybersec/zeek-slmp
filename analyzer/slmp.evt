@@ -1,0 +1,32 @@
+# Zeek interface for the SLMP analyzer.
+
+import SLMP;
+import Zeek_SLMP;
+
+protocol analyzer SLMP_TCP over TCP:
+    parse originator with SLMP::Frames,
+    parse responder with SLMP::Frames;
+
+protocol analyzer SLMP_UDP over UDP:
+    parse originator with SLMP::Frames,
+    parse responder with SLMP::Frames;
+
+on SLMP::Frame if ( self.is_request ) -> event SLMP::request($conn, $is_orig,
+    self.subheader,
+    self?.serial ? self.serial : 0,
+    self.network_no, self.station_no, self.module_io, self.multidrop,
+    self?.ext_station ? self.ext_station : 0,
+    self.request.monitoring_timer,
+    self.request.command, self.request.subcommand,
+    self.request.has_device, self.request.device_code,
+    self.request.head_device, self.request.points,
+    self.request.remote_mode, self.request.clear_mode);
+
+on SLMP::Frame if ( ! self.is_request ) -> event SLMP::response($conn, $is_orig,
+    self.subheader,
+    self?.serial ? self.serial : 0,
+    self.network_no, self.station_no, self.module_io, self.multidrop,
+    self?.ext_station ? self.ext_station : 0,
+    self.response.end_code,
+    self.response.has_command, self.response.command, self.response.subcommand,
+    SLMP::data_head(self.response.data));

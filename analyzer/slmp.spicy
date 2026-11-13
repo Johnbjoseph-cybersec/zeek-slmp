@@ -1,0 +1,258 @@
+# Spicy grammar for the binary encoding of SLMP (SeamLess Message Protocol)
+# 3E, 4E and station number extension frames over TCP or UDP.
+#
+# Field layout follows the public SLMP Reference Manual, SH(NA)-080956ENG
+# revision N, chapter 4 (message format) and chapter 5 (commands). See
+# README.md for the exact document used.
+#
+# Only the binary code variant is parsed. ASCII code frames are not
+# recognised and produce a protocol violation.
+
+module SLMP;
+
+import spicy;
+
+%byte-order = spicy::ByteOrder::Little;
+
+# First subheader byte for each frame kind (the second byte is always 00H).
+const SUB_3E_REQ: uint8 = 0x50;
+const SUB_3E_RES: uint8 = 0xD0;
+const SUB_4E_REQ: uint8 = 0x54;
+const SUB_4E_RES: uint8 = 0xD4;
+const SUB_EXT_REQ: uint8 = 0x68;
+const SUB_EXT_RES: uint8 = 0xE8;
+
+function is_known_subheader(b: uint8): bool {
+    return b == SUB_3E_REQ || b == SUB_3E_RES || b == SUB_4E_REQ || b == SUB_4E_RES ||
+           b == SUB_EXT_REQ || b == SUB_EXT_RES;
+}
+
+# Returns at most the first 18 bytes of response data.
+public function data_head(d: bytes): bytes {
+    if ( |d| > 18 )
+        return d.sub(0, 18);
+    return d;
+}
+
+# A sequence of frames. For TCP this is the whole byte stream of one
+# direction; for UDP it is one datagram.
+public type Frames = unit {
+    frames: Frame[];
+};
+
+type Frame = unit {
+    var is_request: bool;
+    var has_serial: bool;
+    var is_ext: bool;
+
+    subheader: uint8 &requires=is_known_subheader($$) {
+        self.is_request = ($$ == SUB_3E_REQ || $$ == SUB_4E_REQ || $$ == SUB_EXT_REQ);
+        self.has_serial = ($$ != SUB_3E_REQ && $$ != SUB_3E_RES);
+        self.is_ext = ($$ == SUB_EXT_REQ || $$ == SUB_EXT_RES);
+    }
+    subheader_fixed: uint8 &requires=($$ == 0);
+
+    serial: uint16 if ( self.has_serial );
+    serial_fixed: uint16 &requires=($$ == 0) if ( self.has_serial );
+
+    network_no: uint8;
+    station_no: uint8;
+    module_io: uint16;
+    multidrop: uint8;
+
+    ext_fixed: uint8 &requires=($$ == 0) if ( self.is_ext );
+    ext_station: uint16 if ( self.is_ext );
+
+    data_length: uint16;
+
+    switch ( self.is_request ) {
+        True -> request: Request(self) &size=self.data_length;
+        False -> response: Response(self) &size=self.data_length;
+    };
+};
+
+# Device code plus device number. Subcommands 0000/0001 (MELSEC-Q/L
+# compatible) use a 3-byte number and a 1-byte code; 0002/0003 (iQ-R/iQ-L)
+# use a 4-byte number and a 2-byte code.
+type Device = unit(subcommand: uint16) {
+    var number: uint32;
+    var code: uint16;
+
+    short_number: bytes &size=3 if ( subcommand <= 1 ) {
+        self.number = cast<uint32>($$.to_uint(spicy::ByteOrder::Little));
+    }
+    short_code: uint8 if ( subcommand <= 1 ) {
+        self.code = $$;
+    }
+
+    long_number: uint32 if ( subcommand >= 2 ) {
+        self.number = $$;
+    }
+    long_code: uint16 if ( subcommand >= 2 ) {
+        self.code = $$;
+    }
+};
+
+# Device Read 0401 / Device Write 1401: head device and number of points.
+# For 1401 the write data follows and is skipped by the caller.
+type BatchAccess = unit(subcommand: uint16) {
+    device: Device(subcommand);
+    points: uint16;
+};
+
+# Read Random 0403: word and double-word access point counts, then one
+# device specification per point.
+type RandomRead = unit(subcommand: uint16) {
+    word_points: uint8;
+    dword_points: uint8;
+    devices: Device(subcommand)[self.word_points + self.dword_points];
+};
+
+# Write Random 1402 in bit units (subcommand 0001/0003): count, then
+# device plus set/reset value (1 byte for 0001, 2 bytes for 0003).
+type RandomWriteBitEntry = unit(subcommand: uint16) {
+    device: Device(subcommand);
+    value: bytes &size=(subcommand == 1 ? 1 : 2);
+};
+
+type RandomWriteBit = unit(subcommand: uint16) {
+    bit_points: uint8;
+    entries: RandomWriteBitEntry(subcommand)[self.bit_points];
+};
+
+# Write Random 1402 in word units (subcommand 0000/0002): word entries
+# carry 2 bytes of data, double-word entries carry 4 bytes.
+type RandomWriteWordEntry = unit(subcommand: uint16, size: uint64) {
+    device: Device(subcommand);
+    value: bytes &size=size;
+};
+
+type RandomWriteWord = unit(subcommand: uint16) {
+    word_points: uint8;
+    dword_points: uint8;
+    words: RandomWriteWordEntry(subcommand, 2)[self.word_points];
+    dwords: RandomWriteWordEntry(subcommand, 4)[self.dword_points];
+};
+
+# Remote Run 1001: mode and clear mode.
+type RemoteRun = unit {
+    mode: uint16;
+    clear_mode: uint8;
+};
+
+type Request = unit(frame: Frame) {
+    # kind selects the decoder below: 1 batch read/write, 2 random read,
+    # 3 random write (bit units), 4 random write (word units), 5 remote run.
+    # has_device tells whether the device fields are valid.
+    var kind: uint8 = 0;
+    var has_device: bool = False;
+    var device_code: uint16 = 0;
+    var head_device: uint32 = 0;
+    var points: uint32 = 0;
+    var remote_mode: uint16 = 0;
+    var clear_mode: uint8 = 0;
+
+    monitoring_timer: uint16;
+    command: uint16;
+    subcommand: uint16 {
+        # Only the plain device subcommands 0000-0003 are decoded. The
+        # 008x device extension variants use a different layout.
+        local plain = ($$ <= 3);
+        if ( (self.command == 0x0401 || self.command == 0x1401) && plain )
+            self.kind = 1;
+        else if ( self.command == 0x0403 && ($$ == 0 || $$ == 2) )
+            self.kind = 2;
+        else if ( self.command == 0x1402 && ($$ == 1 || $$ == 3) )
+            self.kind = 3;
+        else if ( self.command == 0x1402 && ($$ == 0 || $$ == 2) )
+            self.kind = 4;
+        else if ( self.command == 0x1001 )
+            self.kind = 5;
+    }
+
+    # Station number extension frame: fixed 00H plus 5-byte system area.
+    ext_reserved: bytes &size=6 if ( frame.is_ext );
+
+    switch ( self.kind ) {
+        1 -> batch: BatchAccess(self.subcommand) {
+            self.has_device = True;
+            self.device_code = $$.device.code;
+            self.head_device = $$.device.number;
+            self.points = $$.points;
+        }
+        2 -> random_read: RandomRead(self.subcommand) {
+            self.points = cast<uint32>($$.word_points) + cast<uint32>($$.dword_points);
+            if ( |$$.devices| > 0 ) {
+                self.has_device = True;
+                self.device_code = $$.devices[0].code;
+                self.head_device = $$.devices[0].number;
+            }
+        }
+        3 -> random_write_bit: RandomWriteBit(self.subcommand) {
+            self.points = $$.bit_points;
+            if ( |$$.entries| > 0 ) {
+                self.has_device = True;
+                self.device_code = $$.entries[0].device.code;
+                self.head_device = $$.entries[0].device.number;
+            }
+        }
+        4 -> random_write_word: RandomWriteWord(self.subcommand) {
+            self.points = cast<uint32>($$.word_points) + cast<uint32>($$.dword_points);
+            if ( |$$.words| > 0 ) {
+                self.has_device = True;
+                self.device_code = $$.words[0].device.code;
+                self.head_device = $$.words[0].device.number;
+            }
+            else if ( |$$.dwords| > 0 ) {
+                self.has_device = True;
+                self.device_code = $$.dwords[0].device.code;
+                self.head_device = $$.dwords[0].device.number;
+            }
+        }
+        5 -> remote_run: RemoteRun {
+            self.remote_mode = $$.mode;
+            self.clear_mode = $$.clear_mode;
+        }
+        * -> : void;
+    };
+
+    # Write data and any command-specific payload not decoded above.
+    : skip bytes &eod;
+};
+
+type Response = unit(frame: Frame) {
+    # Command and subcommand are only present in error responses and in
+    # station number extension frames.
+    var has_command: bool = False;
+    var command: uint16 = 0;
+    var subcommand: uint16 = 0;
+
+    end_code: uint16;
+
+    ext_command: uint16 if ( frame.is_ext ) {
+        self.has_command = True;
+        self.command = $$;
+    }
+    ext_subcommand: uint16 if ( frame.is_ext ) {
+        self.subcommand = $$;
+    }
+    ext_reserved: bytes &size=6 if ( frame.is_ext );
+
+    # Information on the error responding station.
+    err_network_no: uint8 if ( self.end_code != 0 );
+    err_station_no: uint8 if ( self.end_code != 0 );
+    err_module_io: uint16 if ( self.end_code != 0 );
+    err_multidrop: uint8 if ( self.end_code != 0 );
+
+    err_command: uint16 if ( self.end_code != 0 && ! frame.is_ext ) {
+        self.has_command = True;
+        self.command = $$;
+    }
+    err_subcommand: uint16 if ( self.end_code != 0 && ! frame.is_ext ) {
+        self.subcommand = $$;
+    }
+
+    # Response data. Only the first bytes are handed to Zeek (enough for the
+    # Read Type Name reply: 16-byte model name plus 2-byte model code).
+    data: bytes &eod;
+};
