@@ -99,6 +99,13 @@ class TcpSession:
         self._seg(to_server, 0x18, payload, step)
         self._seg(not to_server, 0x10)
 
+    def skip(self, to_server: bool, nbytes: int):
+        """Advance the sequence number without emitting a segment (a capture gap)."""
+        if to_server:
+            self.cseq += nbytes
+        else:
+            self.sseq += nbytes
+
     def close(self):
         self._seg(True, 0x11)
         self._seg(False, 0x11)

@@ -38,11 +38,17 @@ public function data_head(d: bytes): bytes {
 # direction; for UDP it is one datagram. The field is anonymous so that
 # parsed frames are not kept: SLMP polling connections can stay up for
 # weeks, and a named vector would grow for the life of the connection.
+#
+# &synchronize lets the parser recover from a frame it cannot parse, or from
+# a gap in a TCP stream: it skips ahead to the next byte pair that can start
+# a frame (a known subheader followed by 00H) and carries on from there.
 public type Frames = unit {
-    : Frame[];
+    : (Frame &synchronize)[];
 };
 
 type Frame = unit {
+    %synchronize-at = /(\x50|\xd0|\x54|\xd4|\x68|\xe8)\x00/;
+
     var is_request: bool;
     var has_serial: bool;
     var is_ext: bool;
@@ -71,6 +77,12 @@ type Frame = unit {
         True -> request: Request(self) &size=self.data_length;
         False -> response: Response(self) &size=self.data_length;
     };
+
+    # A complete frame after a resynchronization ends trial mode (no-op
+    # otherwise).
+    on %done {
+        confirm;
+    }
 };
 
 # Device code plus device number. Subcommands 0000/0001 (MELSEC-Q/L
@@ -228,8 +240,19 @@ type Response = unit(frame: Frame) {
     var has_command: bool = False;
     var command: uint16 = 0;
     var subcommand: uint16 = 0;
+    # Whether the error information block is present. The manual always
+    # includes it in an error response, but a response that carries only the
+    # end code is still logged, with the remaining bytes treated as data.
+    var has_err_info: bool = False;
 
-    end_code: uint16;
+    end_code: uint16 {
+        # Bytes the block needs after the end code: network, station, module
+        # I/O and multidrop (5), plus command and subcommand (4) except in
+        # station number extension frames, which carry those earlier along
+        # with a 6-byte reserved area (4 + 6 + 5 in total).
+        local need: uint64 = frame.is_ext ? 17 : 11;
+        self.has_err_info = ( $$ != 0 && frame.data_length >= need );
+    }
 
     ext_command: uint16 if ( frame.is_ext ) {
         self.has_command = True;
@@ -241,16 +264,16 @@ type Response = unit(frame: Frame) {
     ext_reserved: bytes &size=6 if ( frame.is_ext );
 
     # Information on the error responding station.
-    err_network_no: uint8 if ( self.end_code != 0 );
-    err_station_no: uint8 if ( self.end_code != 0 );
-    err_module_io: uint16 if ( self.end_code != 0 );
-    err_multidrop: uint8 if ( self.end_code != 0 );
+    err_network_no: uint8 if ( self.has_err_info );
+    err_station_no: uint8 if ( self.has_err_info );
+    err_module_io: uint16 if ( self.has_err_info );
+    err_multidrop: uint8 if ( self.has_err_info );
 
-    err_command: uint16 if ( self.end_code != 0 && ! frame.is_ext ) {
+    err_command: uint16 if ( self.has_err_info && ! frame.is_ext ) {
         self.has_command = True;
         self.command = $$;
     }
-    err_subcommand: uint16 if ( self.end_code != 0 && ! frame.is_ext ) {
+    err_subcommand: uint16 if ( self.has_err_info && ! frame.is_ext ) {
         self.subcommand = $$;
     }
 

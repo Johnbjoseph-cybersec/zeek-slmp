@@ -332,6 +332,21 @@ event SLMP::response(c: connection, is_orig: bool, subheader: count,
 	write_info(info);
 	}
 
+# A gap in either direction of a TCP stream can hide a 3E request or its
+# response. 3E frames carry no serial number, so pairing in arrival order
+# would then attach every later response to the wrong request. Log the
+# pending 3E requests as no_response and start pairing afresh.
+event content_gap(c: connection, is_orig: bool, seq: count, length: count)
+	{
+	if ( ! c?$slmp )
+		return;
+
+	local st = c$slmp;
+
+	while ( st$head < st$tail )
+		flush_oldest(st);
+	}
+
 hook finalize_slmp(c: connection)
 	{
 	if ( ! c?$slmp )

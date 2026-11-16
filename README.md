@@ -78,9 +78,18 @@ frame_type command             subcommand device head_device address points end_
 3E         Remote Run          0x0000     -      -           -       -      0xc059   error
 ```
 
-The analyzer confirms the protocol after the first complete frame. Parse errors (unknown
-subheader, non-zero fixed fields, a length that does not match the data) raise a protocol
-violation, which Zeek reports through `analyzer_violation_info` and `analyzer.log`.
+The analyzer confirms the protocol after the first complete frame. After a frame it cannot
+parse (unknown subheader, non-zero fixed fields, a length that does not match the data) or a
+gap in a TCP stream, it skips ahead to the next byte pair that can start a frame and carries on,
+so one bad frame does not end parsing for the rest of a long polling connection. If no valid
+frame follows, Zeek reports a protocol violation through `analyzer_violation_info` and
+`analyzer.log`.
+
+An error response that carries only the end code, without the error information block, is
+logged with its end code and status `error`.
+
+On a TCP gap, 3E requests still waiting for a response are logged as `no_response`, because
+3E frames have no serial number and a missing frame would otherwise shift every later pair.
 
 ## Ports
 
@@ -123,6 +132,7 @@ script with the same name (`slmp_3e_tcp.py` writes `slmp_3e_tcp.pcap`, and so on
 | trace-3e-tcp | 3E over TCP: Read Type Name, batch read/write (Q/L and iQ-R formats), random read/write, remote STOP and RUN, an error end code, two frames in one segment, a frame split across segments |
 | trace-4e-udp | 4E over UDP: serial number pairing with out-of-order responses, remote PAUSE/latch clear/RESET, a request without a response, a response without a request, a station number extension frame |
 | malformed | Unknown subheader, non-zero fixed field, request data length larger than the datagram |
+| recovery | Parsing continues after a missing request segment, a missing response segment, an error response without the error information block, and junk between frames |
 
 ## Sources
 

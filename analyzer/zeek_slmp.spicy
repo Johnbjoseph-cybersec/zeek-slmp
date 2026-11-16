@@ -1,12 +1,15 @@
-# Protocol confirmation for the SLMP analyzers. Parse errors reject the
-# protocol automatically, with the Spicy error as the reason.
+# Protocol confirmation for the SLMP analyzers. Parse errors before the
+# first complete frame reject the protocol, with the Spicy error as the
+# reason; after that the parser resynchronizes (see SLMP::Frames).
 
 module Zeek_SLMP;
 
 import SLMP;
-import zeek;
+import spicy;
 
 # A frame with a valid subheader, header and length that parsed completely.
+# accept_input() confirms the protocol to Zeek and also ends trial mode
+# after a resynchronization.
 on SLMP::Frame::%done {
-    zeek::confirm_protocol();
+    spicy::accept_input();
 }
