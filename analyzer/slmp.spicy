@@ -35,9 +35,11 @@ public function data_head(d: bytes): bytes {
 }
 
 # A sequence of frames. For TCP this is the whole byte stream of one
-# direction; for UDP it is one datagram.
+# direction; for UDP it is one datagram. The field is anonymous so that
+# parsed frames are not kept: SLMP polling connections can stay up for
+# weeks, and a named vector would grow for the life of the connection.
 public type Frames = unit {
-    frames: Frame[];
+    : Frame[];
 };
 
 type Frame = unit {
