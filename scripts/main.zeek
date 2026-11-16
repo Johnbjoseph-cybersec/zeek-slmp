@@ -9,6 +9,8 @@
 
 @load base/protocols/conn/removal-hooks
 
+@load-sigs ./dpd.sig
+
 module SLMP;
 
 export {
@@ -16,15 +18,16 @@ export {
 
 	global log_policy: Log::PolicyHook;
 
-	## TCP ports the analyzer is attached to. SLMP has no fixed port; the
-	## port is set in the device's parameters. These defaults are a common
-	## choice and can be changed with redef.
-	const ports_tcp: set[port] = { 5000/tcp, 5001/tcp, 5002/tcp, 5003/tcp,
-	    5004/tcp, 5005/tcp, 5006/tcp, 5007/tcp, 5008/tcp, 5009/tcp } &redef;
+	## TCP ports the analyzer is always attached to. Empty by default: SLMP
+	## has no fixed port, and the analyzer is attached by the signatures in
+	## dpd.sig instead. Add a port with redef to attach the analyzer to it
+	## unconditionally, for example when only one side of the traffic is
+	## captured.
+	const ports_tcp: set[port] = {} &redef;
 
-	## UDP ports the analyzer is attached to.
-	const ports_udp: set[port] = { 5000/udp, 5001/udp, 5002/udp, 5003/udp,
-	    5004/udp, 5005/udp, 5006/udp, 5007/udp, 5008/udp, 5009/udp } &redef;
+	## UDP ports the analyzer is always attached to. Empty by default, as
+	## for ports_tcp.
+	const ports_udp: set[port] = {} &redef;
 
 	## Maximum number of requests kept waiting for a response per
 	## connection. When exceeded, the oldest is logged as no_response.
@@ -290,7 +293,13 @@ event SLMP::response(c: connection, is_orig: bool, subheader: count,
 		}
 
 	if ( found )
-		info$rtt = network_time() - info$ts;
+		{
+		# The first request on a connection is replayed to the analyzer
+		# when the response confirms SLMP, so both carry the response
+		# time. Leave rtt unset then rather than log a false zero.
+		if ( network_time() > info$ts )
+			info$rtt = network_time() - info$ts;
+		}
 	else
 		{
 		info = base_info(c, network_time(), subheader);

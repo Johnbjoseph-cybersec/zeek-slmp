@@ -4,6 +4,10 @@
 # @TEST-EXEC: btest-diff output
 # @TEST-EXEC: btest-diff slmp.log
 
+# The UDP cases are requests without a response, which the DPD signatures
+# do not match; attach the analyzer to their ports explicitly.
+redef SLMP::ports_udp += { 5003/udp, 5004/udp };
+
 event analyzer_violation_info(atype: AllAnalyzers::Tag, info: AnalyzerViolationInfo)
 	{
 	# Drop the source location suffix, which contains a local build path.

@@ -93,12 +93,20 @@ On a TCP gap, 3E requests still waiting for a response are logged as `no_respons
 
 ## Ports
 
-SLMP has no fixed port: the port is set in each device's parameters. By default the analyzer
-is attached to TCP and UDP ports 5000-5009. Change this with:
+SLMP has no fixed port: the port is set in each device's parameters. The analyzer is attached
+by content, using the dynamic protocol detection signatures in `scripts/dpd.sig`: a request
+subheader from the client and a matching response subheader from the server. No port is
+registered by default, so unrelated services on common SLMP ports (HTTP on 5000, RTP on
+5004/5005) do not reach the analyzer.
+
+Because detection needs the response, the first request on a connection is handed to the
+analyzer when its response arrives: that line's `ts` is the response time and its `rtt` is
+unset. Traffic seen in one direction only (for example requests without responses) is not
+detected. To attach the analyzer to a port unconditionally:
 
 ```zeek
-redef SLMP::ports_tcp += { 6000/tcp };
-redef SLMP::ports_udp += { 6000/udp };
+redef SLMP::ports_tcp += { 5000/tcp };
+redef SLMP::ports_udp += { 5000/udp };
 ```
 
 ## Installation
@@ -132,6 +140,7 @@ script with the same name (`slmp_3e_tcp.py` writes `slmp_3e_tcp.pcap`, and so on
 | trace-3e-tcp | 3E over TCP: Read Type Name, batch read/write (Q/L and iQ-R formats), random read/write, remote STOP and RUN, an error end code, two frames in one segment, a frame split across segments |
 | trace-4e-udp | 4E over UDP: serial number pairing with out-of-order responses, remote PAUSE/latch clear/RESET, a request without a response, a response without a request, a station number extension frame |
 | malformed | Unknown subheader, non-zero fixed field, request data length larger than the datagram |
+| not-slmp | HTTP on 5000/tcp and RTP on 5004/udp do not reach the analyzer; SLMP on 6000/tcp and 6001/udp is detected by content |
 | recovery | Parsing continues after a missing request segment, a missing response segment, an error response without the error information block, and junk between frames |
 
 ## Sources

@@ -7,7 +7,7 @@
 #open XXXX-XX-XX-XX-XX-XX
 #fields	ts	uid	id.orig_h	id.orig_p	id.resp_h	id.resp_p	proto	frame_type	serial	network	station	module_io	multidrop	ext_station	monitoring_timer	command	command_code	subcommand	device	head_device	address	points	run_mode	clear_mode	model_name	model_code	end_code	status	rtt
 #types	time	string	addr	port	addr	port	enum	string	count	count	count	string	count	count	count	string	string	string	string	count	string	count	string	count	string	string	string	string	interval
-XXXXXXXXXX.XXXXXX	CHhAvVGS1DHFjwGM9	192.168.10.10	49152	192.168.10.20	5000	tcp	3E	-	0	255	0x03ff	0	-	16	Read Type Name	0x0101	0x0000	-	-	-	-	-	-	R04CPU	0x4800	0x0000	ok	0.002000
+XXXXXXXXXX.XXXXXX	CHhAvVGS1DHFjwGM9	192.168.10.10	49152	192.168.10.20	5000	tcp	3E	-	0	255	0x03ff	0	-	16	Read Type Name	0x0101	0x0000	-	-	-	-	-	-	R04CPU	0x4800	0x0000	ok	-
 XXXXXXXXXX.XXXXXX	CHhAvVGS1DHFjwGM9	192.168.10.10	49152	192.168.10.20	5000	tcp	3E	-	0	255	0x03ff	0	-	16	Device Read	0x0401	0x0000	D	100	D100	3	-	-	-	-	0x0000	ok	0.002000
 XXXXXXXXXX.XXXXXX	CHhAvVGS1DHFjwGM9	192.168.10.10	49152	192.168.10.20	5000	tcp	3E	-	0	255	0x03ff	0	-	16	Device Write	0x1401	0x0001	M	10	M10	4	-	-	-	-	0x0000	ok	0.002000
 XXXXXXXXXX.XXXXXX	CHhAvVGS1DHFjwGM9	192.168.10.10	49152	192.168.10.20	5000	tcp	3E	-	0	255	0x03ff	0	-	16	Device Read Random	0x0403	0x0000	D	200	D200	2	-	-	-	-	0x0000	ok	0.002000
